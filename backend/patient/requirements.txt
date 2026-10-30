@@ -1,0 +1,26 @@
+# FastAPI framework for building REST APIs
+fastapi
+
+# ASGI server to run FastAPI applications
+uvicorn[standard]
+
+# ORM for database models, queries, and relationships
+sqlalchemy
+
+# Pydantic validation with email address support
+pydantic[email]
+
+# Manage application settings and environment variables
+pydantic-settings
+
+# PostgreSQL database driver
+psycopg[binary]
+
+# Database schema migrations, similar to Rails migrations
+alembic
+
+# Load environment variables from .env files
+python-dotenv
+
+# JWT token verification for authenticated doctor requests
+python-jose[cryptography]

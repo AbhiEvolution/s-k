@@ -1,0 +1,73 @@
+
+services:
+  postgres-doctor:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DOCTOR_POSTGRES_DB}
+      POSTGRES_USER: ${DOCTOR_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${DOCTOR_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_doctor_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  doctors-api:
+    image: doctors-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${DOCTOR_POSTGRES_USER}:${DOCTOR_POSTGRES_PASSWORD}@postgres-doctor:5432/${DOCTOR_POSTGRES_DB}"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+    depends_on:
+      postgres-doctor:
+        condition: service_healthy
+
+  postgres-patient:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PATIENT_POSTGRES_DB}
+      POSTGRES_USER: ${PATIENT_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${PATIENT_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_patient_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  patients-api:
+    image: patients-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${PATIENT_POSTGRES_USER}:${PATIENT_POSTGRES_PASSWORD}@postgres-patient:5432/${PATIENT_POSTGRES_DB}"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+    depends_on:
+      postgres-patient:
+        condition: service_healthy
+
+  frontend:
+    image: frontend-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "5173:3000"
+
+volumes:
+  postgres_doctor_data:
+  postgres_patient_data:
