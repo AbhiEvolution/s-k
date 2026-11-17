@@ -59,3 +59,22 @@ export async function apiFetch(path, options = {}) {
   if (response.status === 401) store.dispatch(clearCredentials())
   return response
 }
+
+/** A readable message from a failed API response (handles FastAPI validation errors). */
+export async function errorMessage(response, fallback) {
+  const data = await response.json().catch(() => ({}))
+  const detail = data?.detail
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        const field = String(item.loc?.at(-1) ?? 'Field').replaceAll('_', ' ')
+        return `${field}: ${item.msg}`
+      })
+      .join('\n')
+  }
+  return typeof detail === 'string' ? detail : fallback
+}
+
+export const networkMessage = (err) =>
+  err instanceof TypeError ? 'Unable to connect to the server.' : err.message

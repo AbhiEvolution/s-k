@@ -123,7 +123,7 @@ export default function Login() {
             <button
               type="button"
               onClick={() => navigate('/register')}
-              className="font-semibold text-blue-600 hover:text-blue-700"
+              className="font-semibold text-brand-600 hover:text-brand-700"
             >
               Register
             </button>

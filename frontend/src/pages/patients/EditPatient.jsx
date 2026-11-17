@@ -4,7 +4,6 @@ import { useNavigate, useParams } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../../features/auth/authSlice'
 import { apiFetch } from '../../api/client'
-import Header from '../../components/Header'
 
 export default function EditPatient() {
   const { id } = useParams()
@@ -17,6 +16,7 @@ export default function EditPatient() {
     age: '',
     address: '',
     mobile_number: '',
+    email: '',
     gender: '',
   })
 
@@ -63,6 +63,7 @@ export default function EditPatient() {
           age: data.age ?? '',
           address: data.address ?? '',
           mobile_number: data.mobile_number ?? '',
+          email: data.email ?? '',
           gender: data.gender ?? '',
         })
       } catch (err) {
@@ -101,6 +102,7 @@ export default function EditPatient() {
           body: JSON.stringify({
             ...patient,
             age: Number(patient.age),
+            email: patient.email.trim() || null,
           }),
         }
       )
@@ -128,7 +130,7 @@ export default function EditPatient() {
         throw new Error(message)
       }
 
-      navigate('/dashboard')
+      navigate('/patients')
     } catch (err) {
       setError(
         err instanceof TypeError
@@ -143,7 +145,6 @@ export default function EditPatient() {
   if (loading) {
     return (
       <>
-        <Header />
         <main className="page-main page-main-narrow">
           <section className="page-card">
             <header className="page-card-header">
@@ -163,7 +164,6 @@ export default function EditPatient() {
 
   return (
     <>
-      <Header />
       <main className="page-main page-main-narrow">
         <section className="page-card">
           <header className="page-card-header flex items-start justify-between gap-4">
@@ -173,7 +173,7 @@ export default function EditPatient() {
             </div>
             <button
               type="button"
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/patients')}
               className="button-secondary"
             >
               Cancel
@@ -187,10 +187,10 @@ export default function EditPatient() {
               </p>
               <button
                 type="button"
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate('/patients')}
                 className="button-secondary"
               >
-                Back to dashboard
+                Back to patients
               </button>
             </div>
           ) : (
@@ -198,6 +198,7 @@ export default function EditPatient() {
               {[
                 { name: 'name', label: 'Name', type: 'text' },
                 { name: 'mobile_number', label: 'Mobile Number', type: 'tel' },
+                { name: 'email', label: 'Email (for appointment notices)', type: 'email' },
                 { name: 'age', label: 'Age', type: 'number' },
                 { name: 'address', label: 'Address', type: 'text' },
               ].map((field) => (
