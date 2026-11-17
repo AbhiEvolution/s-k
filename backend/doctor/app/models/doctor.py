@@ -1,20 +1,38 @@
-from sqlalchemy import Column, Integer, String, DateTime, func
+from datetime import datetime
+
+from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column
+
 from db.database import Base
 
 
 class Doctor(Base):
-  __tablename__ = "doctors"
+    """A doctor's PROFILE. Identity (email, password) lives in the auth service."""
 
-  id = Column(Integer, primary_key=True, index=True)
+    __tablename__ = "doctors"
 
-  username = Column(String(100), unique=True, index=True, nullable=False)
-  email = Column(String(100), unique=True, index=True, nullable=False)
-  password = Column(String(255), nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True)
 
-  age = Column(Integer, nullable=True)
-  address = Column(String(255), nullable=True)
-  mobile_number = Column(String(15), nullable=True)
-  gender = Column(String(20), nullable=True)
+    # The auth service's user id. Not a foreign key: it is another database.
+    # unique=True: one profile per account, enforced by the database.
+    user_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
 
-  created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-  updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    # The clinic this doctor works at (clinic service id; again no foreign key).
+    # Never trusted from the client alone: the service verifies membership by
+    # asking the clinic service before saving it.
+    clinic_id: Mapped[int | None] = mapped_column(Integer, index=True)
+
+    full_name: Mapped[str] = mapped_column(String(100))
+    specialty: Mapped[str | None] = mapped_column(String(100))
+
+    age: Mapped[int | None] = mapped_column(Integer)
+    address: Mapped[str | None] = mapped_column(String(255))
+    mobile_number: Mapped[str | None] = mapped_column(String(15))
+    gender: Mapped[str | None] = mapped_column(String(20))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

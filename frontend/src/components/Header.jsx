@@ -1,13 +1,23 @@
 
 import { useNavigate } from 'react-router'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../features/auth/authSlice'
+import { API } from '../api/client'
 
 export default function Header({ showLogout = true }) {
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const refreshToken = useSelector((state) => state.auth.refreshToken)
 
   const logout = () => {
+    // Revoke the session on the server (fire and forget), then forget it locally.
+    if (refreshToken) {
+      fetch(`${API}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }).catch(() => {})
+    }
     dispatch(clearCredentials())
     navigate('/login', { replace: true })
   }

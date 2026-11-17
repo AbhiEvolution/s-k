@@ -1,27 +1,80 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.schemas.doctor import DoctorCreate, DoctorResponse
-from app.services.doctor import DoctorService
-from app.core.dependencies import get_current_doctor
-from app.models.doctor import Doctor
+from app.core.auth import CurrentUser, bearer_scheme, get_current_user, require_role
+from app.core.clinic_client import ClinicServiceUnavailableError, NotClinicMemberError
+from app.schemas.doctor import DoctorProfile, DoctorPublic, DoctorResponse
+from app.services.doctor import (
+    DoctorService,
+    ProfileAlreadyExistsError,
+    ProfileNotFoundError,
+)
 from db.database import get_db
 
-router = APIRouter(
-  prefix="/doctors",
-  tags=["Doctors"], 
-)
+router = APIRouter(prefix="/doctors", tags=["Doctors"])
 
-@router.post("/register", response_model=DoctorResponse, status_code=status.HTTP_201_CREATED)
-def register_doctor(data: DoctorCreate, db: Session = Depends(get_db)):
-  try:
-    return DoctorService.create_doctor(db, data)
-  except ValueError as exc:
-    raise HTTPException(
-      status_code=status.HTTP_409_CONFLICT,
-      detail=str(exc)
-    )
+NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Doctor profile not found")
 
+
+def _raw_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> str:
+    # get_current_user has already verified this token; we only forward it.
+    return credentials.credentials
+
+
+@router.post("", response_model=DoctorResponse, status_code=status.HTTP_201_CREATED)
+def create_my_profile(
+    data: DoctorProfile,
+    user: CurrentUser = Depends(require_role("doctor")),
+    token: str = Depends(_raw_token),
+    db: Session = Depends(get_db),
+):
+    # The owner is the token's user, never a value from the request body.
+    try:
+        return DoctorService.create_profile(db, user.id, token, data)
+    except ProfileAlreadyExistsError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Profile already exists")
+    except NotClinicMemberError:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a doctor in that clinic")
+    except ClinicServiceUnavailableError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Clinic service unavailable")
+
+
+# Declared before "/{doctor_id}" so "me" is not parsed as an id.
 @router.get("/me", response_model=DoctorResponse)
-def get_my_profile(current_doctor: Doctor = Depends(get_current_doctor)):
-  return current_doctor
+def get_my_profile(
+    user: CurrentUser = Depends(require_role("doctor")), db: Session = Depends(get_db)
+):
+    try:
+        return DoctorService.get_my_profile(db, user.id)
+    except ProfileNotFoundError:
+        raise NOT_FOUND
+
+
+@router.put("/me", response_model=DoctorResponse)
+def update_my_profile(
+    data: DoctorProfile,
+    user: CurrentUser = Depends(require_role("doctor")),
+    token: str = Depends(_raw_token),
+    db: Session = Depends(get_db),
+):
+    try:
+        return DoctorService.update_my_profile(db, user.id, token, data)
+    except ProfileNotFoundError:
+        raise NOT_FOUND
+    except NotClinicMemberError:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a doctor in that clinic")
+    except ClinicServiceUnavailableError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Clinic service unavailable")
+
+
+@router.get("/{doctor_id}", response_model=DoctorPublic)
+def get_doctor(
+    doctor_id: int,
+    _user: CurrentUser = Depends(get_current_user),  # any logged-in user
+    db: Session = Depends(get_db),
+):
+    try:
+        return DoctorService.get_public(db, doctor_id)
+    except ProfileNotFoundError:
+        raise NOT_FOUND

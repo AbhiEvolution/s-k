@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../../features/auth/authSlice'
+import { apiFetch } from '../../api/client'
 import Header from '../../components/Header'
 
 export default function EditPatient() {
@@ -32,8 +33,8 @@ export default function EditPatient() {
 
     async function loadPatient() {
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_PATIENT_API_URL}/patients/${id}`,
+        const response = await apiFetch(
+          `/patients/${id}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -89,8 +90,8 @@ export default function EditPatient() {
     setError('')
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_PATIENT_API_URL}/patients/${id}`,
+      const response = await apiFetch(
+        `/patients/${id}`,
         {
           method: 'PUT',
           headers: {

@@ -1,55 +1,74 @@
 import os
+from dataclasses import dataclass
+from functools import lru_cache
 
+import jwt
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 
 load_dotenv()
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-
-if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
-  raise RuntimeError("JWT_SECRET_KEY must be set to at least 32 characters")
+# The auth service's PUBLIC keys. There is no shared secret any more.
+AUTH_JWKS_URL = os.getenv("AUTH_JWKS_URL", "http://localhost:8003/.well-known/jwks.json")
+JWT_ISSUER = os.getenv("JWT_ISSUER", "auth-service")
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "clinic-platform")
+ALGORITHM = "RS256"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-def get_current_doctor_id(
+
+@dataclass(frozen=True)
+class CurrentUser:
+  id: int  # the auth service's user id (the token's `sub`)
+  role: str  # admin | doctor | patient
+
+
+@lru_cache
+def _jwks_client() -> PyJWKClient:
+  return PyJWKClient(AUTH_JWKS_URL, cache_keys=True)
+
+
+def get_signing_key(token: str):
+  """Public key matching the token's `kid`. Tests replace this function."""
+  return _jwks_client().get_signing_key_from_jwt(token).key
+
+
+def _unauthorized(detail: str) -> HTTPException:
+  return HTTPException(
+    status.HTTP_401_UNAUTHORIZED, detail, headers={"WWW-Authenticate": "Bearer"}
+  )
+
+
+def get_current_user(
   credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-) -> int:
+) -> CurrentUser:
   if credentials is None:
-    raise HTTPException(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="Missing authentication credentials",
-      headers={"WWW-Authenticate": "Bearer"},
-    )
+    raise _unauthorized("Missing authentication credentials")
 
   try:
     payload = jwt.decode(
       credentials.credentials,
-      JWT_SECRET_KEY,
-      algorithms=[JWT_ALGORITHM],
+      get_signing_key(credentials.credentials),
+      algorithms=[ALGORITHM],
+      audience=JWT_AUDIENCE,
+      issuer=JWT_ISSUER,
+      options={"require": ["exp", "iat", "sub", "iss", "aud"]},
     )
+  except PyJWKClientConnectionError:
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Auth service unavailable")
+  except jwt.PyJWTError:
+    raise _unauthorized("Could not validate credentials")
 
-    if payload.get("purpose") == "password_reset":
-      raise JWTError("Password reset token cannot access APIs")
+  subject = payload["sub"]
+  if payload.get("type") != "access" or not str(subject).isdigit() or int(subject) <= 0:
+    raise _unauthorized("Could not validate credentials")
 
-    subject = payload.get("sub")
+  return CurrentUser(id=int(subject), role=str(payload.get("role", "")))
 
-    if not isinstance(subject, str) or not subject.isdigit():
-      raise JWTError("Invalid doctor ID")
 
-    doctor_id = int(subject)
-
-    if doctor_id <= 0:
-      raise JWTError("Doctor ID must be positive")
-
-    return doctor_id
-
-  except (JWTError, KeyError, TypeError, ValueError) as exc:
-    raise HTTPException(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="Could not validate credentials",
-      headers={"WWW-Authenticate": "Bearer"},
-    ) from exc
+def get_raw_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> str:
+  # get_current_user already verified it; we only forward it to the clinic service.
+  return credentials.credentials

@@ -2,6 +2,29 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import Header from '../components/Header'
+import { API } from '../api/client'
+
+const postJson = (path, body) =>
+  fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+async function readError(response) {
+  const data = await response.json().catch(() => ({}))
+  const detail = data?.detail
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((err) => {
+        const field = String(err.loc?.at(-1) ?? 'Field').replaceAll('_', ' ')
+        return err.type === 'missing' ? `${field} is required.` : `${field}: ${err.msg}`
+      })
+      .join(' ')
+  }
+  return typeof detail === 'string' ? detail : 'Registration failed. Please check your details.'
+}
 
 export default function Register() {
   const navigate = useNavigate()
@@ -22,48 +45,37 @@ export default function Register() {
     setLoading(true)
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_DOCTOR_API_URL}/doctors/register`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            username: username.trim(),
-            email: email.trim(),
-            password,
-            mobile_number: mobileNumber.trim(),
-            age: Number(age),
-            address: address.trim(),
-            gender,
-          }),
-        }
-      )
+      // Step 1: create the account in the auth service.
+      const registerRes = await postJson('/auth/register', {
+        email: email.trim(),
+        password,
+        role: 'doctor',
+      })
+      if (!registerRes.ok) throw new Error(await readError(registerRes))
 
-      const data = await response.json().catch(() => ({}))
- 
-      if (!response.ok) {
-        const detail = data?.detail
+      // Step 2: log in, so we hold a token.
+      const loginRes = await postJson('/auth/login', { email: email.trim(), password })
+      if (!loginRes.ok) throw new Error(await readError(loginRes))
+      const tokens = await loginRes.json()
 
-        if (Array.isArray(detail)) {
-          const messages = detail.map((err) => {
-            const field = err.loc?.at(-1) ?? 'Field'
-
-            if (err.type === 'missing') {
-              return `${field.replaceAll('_', ' ')} is required.`
-            }
-
-            return err.msg
-          })
-
-          throw new Error(messages.join('\n'))
-        }
-
+      // Step 3: create the doctor profile in the doctor service.
+      const profileRes = await fetch(`${API}/doctors`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokens.access_token}`,
+        },
+        body: JSON.stringify({
+          full_name: username.trim(),
+          mobile_number: mobileNumber.trim(),
+          age: Number(age),
+          address: address.trim(),
+          gender,
+        }),
+      })
+      if (!profileRes.ok) {
         throw new Error(
-          typeof detail === 'string'
-            ? detail
-            : 'Registration failed. Please check your details.'
+          `Your account was created, but the profile could not be saved: ${await readError(profileRes)} Please sign in and try again.`
         )
       }
 
@@ -98,7 +110,7 @@ export default function Register() {
 
           <div className="field-group">
             <label htmlFor="username" className="field-label">
-              Username
+              Full name
             </label>
             <input
               id="username"
@@ -173,7 +185,7 @@ export default function Register() {
             <input
               id="age"
               type="number"
-              min="0"
+              min="18"
               max="130"
               value={age}
               onChange={(event) => setAge(event.target.value)}
@@ -194,7 +206,7 @@ export default function Register() {
               placeholder="Enter your address"
               autoComplete="street-address"
               rows={3}
-              maxLength={225}
+              maxLength={255}
               required
               className="field-control"
             />

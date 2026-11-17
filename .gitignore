@@ -1,0 +1,16 @@
+# Secrets and local config (copy .env.example to .env)
+.env
+*.env
+!.env.example
+backend/auth/keys/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv*/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/

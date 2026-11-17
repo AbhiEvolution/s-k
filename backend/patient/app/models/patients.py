@@ -8,8 +8,12 @@ class Patient(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # ID of the doctor who owns this patient
-    doctor_id = Column(Integer, nullable=False, index=True)
+    # The clinic that owns this record (clinic service id; no foreign key).
+    # Access = "caller is a member of this clinic", checked via the clinic service.
+    clinic_id = Column(Integer, nullable=False, index=True)
+
+    # Audit only: the auth user id of whoever created the record. It grants no access.
+    created_by_user_id = Column(Integer, nullable=False, index=True)
 
     name = Column(String(100), nullable=False)
     age = Column(Integer, nullable=True)

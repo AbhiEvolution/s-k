@@ -1,26 +1,22 @@
-import os
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-# Load variables from the project-root .env file
-load_dotenv()
+from app.core.config import get_settings
 
-DATABASE_URL = os.environ["DATABASE_URL"]
 
-engine = create_engine(DATABASE_URL)
+class Base(DeclarativeBase):
+    """Parent class of every ORM model."""
 
-SessionLocal = sessionmaker(
-  autocommit=False,
-  autoflush=False,
-  bind=engine
-)
 
-Base = declarative_base()
+engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
 
 def get_db():
-  db = SessionLocal()
-  try:
-    yield db
-  finally:
-    db.close()
+    """FastAPI dependency: one session per request, always closed."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
