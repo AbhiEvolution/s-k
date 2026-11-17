@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../../features/auth/authSlice'
+import { apiFetch } from '../../api/client'
 import Header from '../../components/Header'
 
 export default function NewPatient() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const token = useSelector((state) => state.auth.accessToken)
+  const clinicId = useSelector((state) => state.auth.clinicId)
 
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
@@ -26,11 +28,16 @@ export default function NewPatient() {
       return
     }
 
+    if (!clinicId) {
+      setError('Select a clinic on the dashboard before adding a patient.')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_PATIENT_API_URL}/patients`,
+      const response = await apiFetch(
+        '/patients',
         {
           method: 'POST',
           headers: {
@@ -38,6 +45,7 @@ export default function NewPatient() {
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
+            clinic_id: clinicId,
             name: name.trim(),
             age: Number(age),
             address: address.trim(),

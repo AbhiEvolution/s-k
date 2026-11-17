@@ -1,102 +1,75 @@
+from dataclasses import dataclass
+from functools import lru_cache
 
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Any
+import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 
-from dotenv import load_dotenv
-from jose import JWTError, jwt
-from fastapi.security import HTTPBearer
-# from fastapi.security import OAuth2PasswordBearer
+from app.core.config import get_settings
 
-load_dotenv()
+ALGORITHM = "RS256"
+bearer_scheme = HTTPBearer(auto_error=False)
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
-  os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
-)
+@dataclass(frozen=True)
+class CurrentUser:
+    id: int  # the auth service's user id (the token's `sub`)
+    role: str  # admin | doctor | patient
 
-if not JWT_SECRET_KEY or len(JWT_SECRET_KEY) < 32:
-  raise RuntimeError(
-    "JWT_SECRET_KEY must be set to at least 32 characters"
-  )
 
-# oauth2_scheme = OAuth2PasswordBearer(
-#   tokenUrl="/api/v1/auth/login"
-# )
+@lru_cache
+def _jwks_client() -> PyJWKClient:
+    return PyJWKClient(get_settings().auth_jwks_url, cache_keys=True)
 
-oauth2_scheme = HTTPBearer()
 
-class Jwt:
+def get_signing_key(token: str):
+    """Public key matching the token's `kid`. Tests replace this function."""
+    return _jwks_client().get_signing_key_from_jwt(token).key
 
-  @staticmethod
-  def create_access_token(
-    data: dict[str, Any],
-    expires_delta: timedelta | None = None,
-  ) -> str:
-    to_encode = data.copy()
 
-    now = datetime.now(timezone.utc)
-    expire = now + (expires_delta
-      if expires_delta is not None
-      else timedelta(
-        minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-      )
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status.HTTP_401_UNAUTHORIZED, detail, headers={"WWW-Authenticate": "Bearer"}
     )
 
-    to_encode.update({
-      "iat": now,
-      "exp": expire,
-    })
 
-    return jwt.encode(
-      to_encode,
-      JWT_SECRET_KEY,
-      algorithm=JWT_ALGORITHM,
-    )
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> CurrentUser:
+    """Verify the bearer token locally using the auth service's public key."""
+    if credentials is None:
+        raise _unauthorized("Missing authentication credentials")
 
-  @staticmethod
-  def get_doctor_id(token: str) -> int:
-    payload = jwt.decode(
-      token,
-      JWT_SECRET_KEY,
-      algorithms=[JWT_ALGORITHM],
-    )
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            get_signing_key(credentials.credentials),
+            algorithms=[ALGORITHM],
+            audience=settings.jwt_audience,
+            issuer=settings.jwt_issuer,
+            options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+        )
+    except PyJWKClientConnectionError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Auth service unavailable")
+    except jwt.PyJWTError:
+        raise _unauthorized("Could not validate credentials")
 
-    subject = payload.get("sub")
+    subject = payload["sub"]
+    if payload.get("type") != "access" or not str(subject).isdigit() or int(subject) <= 0:
+        raise _unauthorized("Could not validate credentials")
 
-    if not isinstance(subject, str) or not subject.isdigit():
-      raise JWTError("Token subject is missing or invalid")
+    return CurrentUser(id=int(subject), role=str(payload.get("role", "")))
 
-    doctor_id = int(subject)
 
-    if doctor_id <= 0:
-      raise JWTError("Token subject is invalid")
+def require_role(*roles: str):
+    """Dependency factory: the account role must be one of `roles`."""
 
-    return doctor_id
+    def dependency(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if user.role not in roles:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient role")
+        return user
 
-  @staticmethod
-  def create_password_reset_token(doctor_id: int) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {"sub": str(doctor_id), "purpose": "password_reset", "iat": now, "exp": now + timedelta(minutes=15),}
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-
-  @staticmethod
-  def verify_password_reset_token(token: str) -> int:
-    payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-
-    if payload.get("purpose") != "password_reset":
-      raise JWTError("Invalid token purpose")
-
-    subject = payload.get("sub")
-
-    if not isinstance(subject, str) or not subject.isdigit():
-      raise JWTError("Invalid token subject")
-
-    doctor_id = int(subject)
-
-    if doctor_id <= 0:
-      raise JWTError("Invalid doctor ID")
-
-    return doctor_id
+    return dependency

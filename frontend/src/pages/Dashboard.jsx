@@ -1,95 +1,121 @@
-
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
-import { clearCredentials } from '../features/auth/authSlice'
+import { clearCredentials, setClinic } from '../features/auth/authSlice'
+import { apiFetch } from '../api/client'
 import Header from '../components/Header'
 
-const DOCTOR_API = import.meta.env.VITE_DOCTOR_API_URL
-const PATIENT_API = import.meta.env.VITE_PATIENT_API_URL
+const detailOf = (data, fallback) =>
+  typeof data?.detail === 'string' ? data.detail : fallback
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const token = useSelector((state) => state.auth.accessToken)
+  const clinicId = useSelector((state) => state.auth.clinicId)
 
   const [doctor, setDoctor] = useState(null)
+  const [clinics, setClinics] = useState([])
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState(null)
 
+  // 1) Who am I, and which clinics do I belong to?
   useEffect(() => {
     if (!token) {
       navigate('/login', { replace: true })
       return
     }
 
-    async function loadDashboard() {
+    let cancelled = false
+
+    async function loadProfileAndClinics() {
       try {
         setLoading(true)
         setError('')
 
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        }
-
-        const [doctorRes, patientsRes] = await Promise.all([
-          fetch(`${DOCTOR_API}/doctors/me`, { headers }),
-          fetch(`${PATIENT_API}/patients`, { headers }),
+        const [doctorRes, clinicsRes] = await Promise.all([
+          apiFetch('/doctors/me'),
+          apiFetch('/clinics'),
         ])
 
-        if (doctorRes.status === 401 || patientsRes.status === 401) {
+        if (doctorRes.status === 401 || clinicsRes.status === 401) {
           dispatch(clearCredentials())
           navigate('/login', { replace: true })
           return
         }
 
-        const [doctorData, patientsData] = await Promise.all([
-          doctorRes.json().catch(() => ({})),
-          patientsRes.json().catch(() => ({})),
-        ])
+        // A missing profile (404) is not fatal: we just show a generic name.
+        if (doctorRes.ok && !cancelled) setDoctor(await doctorRes.json())
 
-        if (!doctorRes.ok) {
-          throw new Error(
-            typeof doctorData?.detail === 'string'
-              ? doctorData?.detail
-              : 'Failed to load doctor profile.'
-          )
+        if (!clinicsRes.ok) {
+          const data = await clinicsRes.json().catch(() => ({}))
+          throw new Error(detailOf(data, 'Failed to load clinics.'))
         }
 
-        if (!patientsRes.ok) {
-          throw new Error(
-            typeof patientsData?.detail === 'string'
-              ? patientsData?.detail
-              : 'Failed to load patients.'
-          )
+        const clinicList = await clinicsRes.json()
+        if (cancelled) return
+        setClinics(clinicList)
+
+        // Keep the remembered clinic only if I still belong to it.
+        if (!clinicList.some((clinic) => clinic.id === clinicId)) {
+          dispatch(setClinic(clinicList[0]?.id ?? null))
         }
-
-        setDoctor(doctorData)
-
-        const patientList = Array.isArray(patientsData)
-          ? patientsData
-          : Array.isArray(patientsData?.items)
-            ? patientsData.items
-            : Array.isArray(patientsData?.patients)
-              ? patientsData.patients
-              : []
-
-        setPatients(patientList)
       } catch (err) {
-        setError(
-          err instanceof TypeError
-            ? 'Unable to connect to the server.'
-            : err.message
-        )
+        if (!cancelled) {
+          setError(
+            err instanceof TypeError
+              ? 'Unable to connect to the server.'
+              : err.message
+          )
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
 
-    loadDashboard()
+    loadProfileAndClinics()
+    return () => {
+      cancelled = true
+    }
+    // clinicId is intentionally not a dependency: this effect sets it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, dispatch, navigate])
+
+  // 2) The patients of the selected clinic.
+  useEffect(() => {
+    if (!clinicId) return
+
+    let cancelled = false
+
+    async function loadPatients() {
+      try {
+        const response = await apiFetch(`/patients?clinic_id=${clinicId}`)
+        const data = await response.json().catch(() => ({}))
+
+        if (response.status === 401) return // apiFetch already cleared the session
+
+        if (!response.ok) {
+          throw new Error(detailOf(data, 'Failed to load patients.'))
+        }
+        if (!cancelled) setPatients(Array.isArray(data) ? data : [])
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof TypeError
+              ? 'Unable to connect to the server.'
+              : err.message
+          )
+        }
+      }
+    }
+
+    loadPatients()
+    return () => {
+      cancelled = true
+    }
+  }, [clinicId, token])
 
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this patient?')) {
@@ -100,12 +126,7 @@ export default function Dashboard() {
       setDeletingId(id)
       setError('')
 
-      const response = await fetch(`${PATIENT_API}/patients/${id}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
+      const response = await apiFetch(`/patients/${id}`, { method: 'DELETE' })
 
       if (response.status === 401) {
         dispatch(clearCredentials())
@@ -115,16 +136,10 @@ export default function Dashboard() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
-        throw new Error(
-          typeof data?.detail === 'string'
-            ? data.detail
-            : 'Failed to delete patient.'
-        )
+        throw new Error(detailOf(data, 'Failed to delete patient.'))
       }
 
-      setPatients((prev) =>
-        prev.filter((patient) => patient.id !== id)
-      )
+      setPatients((prev) => prev.filter((patient) => patient.id !== id))
     } catch (err) {
       setError(
         err instanceof TypeError
@@ -149,49 +164,66 @@ export default function Dashboard() {
     )
   }
 
-  const doctorName = doctor?.name ?? doctor?.username ?? 'Doctor'
+  const doctorName = doctor?.full_name ?? 'Doctor'
+  const hasClinic = clinicId !== null && clinics.some((clinic) => clinic.id === clinicId)
+  const shownPatients = hasClinic ? patients : []
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <Header />
       <main className="page-main grid gap-6">
         {/* Welcome */}
         <section className="page-card flex flex-col justify-between gap-4 p-6 sm:flex-row sm:items-center">
           <div>
             <p className="page-description mt-0">Welcome back</p>
-            <h2 className="page-title mt-1">
-              Dr. {doctorName}
-            </h2>
+            <h2 className="page-title mt-1">Dr. {doctorName}</h2>
             <p className="page-description">
-              Manage your patient records in one place.
+              Manage your clinic&apos;s patient records in one place.
             </p>
           </div>
 
-          <Link
-            to="/patient/new"
-            className="button-primary"
-          >
-            + Add Patient
-          </Link>
+          {hasClinic && (
+            <Link to="/patient/new" className="button-primary">
+              + Add Patient
+            </Link>
+          )}
+        </section>
+
+        {/* Clinic */}
+        <section className="page-card p-5">
+          <p className="field-label">Clinic</p>
+          {clinics.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-600">
+              You are not a member of any clinic yet. Ask a clinic administrator
+              to add you before managing patients.
+            </p>
+          ) : clinics.length === 1 ? (
+            <p className="mt-2 text-lg font-semibold text-slate-900">{clinics[0].name}</p>
+          ) : (
+            <select
+              aria-label="Select clinic"
+              value={clinicId ?? ''}
+              onChange={(event) => dispatch(setClinic(Number(event.target.value)))}
+              className="field-control mt-2"
+            >
+              {clinics.map((clinic) => (
+                <option key={clinic.id} value={clinic.id}>
+                  {clinic.name}
+                </option>
+              ))}
+            </select>
+          )}
         </section>
 
         {/* Patient count */}
         <section className="page-card p-5">
-          <p className="field-label">
-            Total Patients
-          </p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">
-            {patients.length}
-          </p>
+          <p className="field-label">Total Patients</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{shownPatients.length}</p>
         </section>
 
         {/* Error */}
         {error && (
-          <div
-            role="alert"
-            className="feedback-error"
-          >
+          <div role="alert" className="feedback-error">
             {error}
           </div>
         )}
@@ -199,21 +231,17 @@ export default function Dashboard() {
         {/* Patient list */}
         <section className="page-card">
           <div className="page-card-header">
-            <h2 className="page-title text-lg">
-              My Patients
-            </h2>
+            <h2 className="page-title text-lg">Clinic Patients</h2>
             <p className="page-description">
-              View and manage your patient records.
+              View and manage the patient records of the selected clinic.
             </p>
           </div>
 
-          {patients.length === 0 ? (
+          {shownPatients.length === 0 ? (
             <div className="px-5 py-12 text-center">
-            <p className="font-semibold text-slate-800">
-                No patients found
-              </p>
+              <p className="font-semibold text-slate-800">No patients found</p>
               <p className="mt-1 text-sm text-gray-500">
-                Add a patient to get started.
+                {hasClinic ? 'Add a patient to get started.' : 'Join a clinic to see patients.'}
               </p>
             </div>
           ) : (
@@ -230,15 +258,11 @@ export default function Dashboard() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
-                  {patients.map((patient) => (
+                  {shownPatients.map((patient) => (
                     <tr key={patient.id} className="hover:bg-slate-50">
                       <td className="px-5 py-4">{patient.id}</td>
-                      <td className="px-5 py-4 font-medium text-slate-900">
-                        {patient.name}
-                      </td>
-                      <td className="px-5 py-4">
-                        {patient.age ?? '-'}
-                      </td>
+                      <td className="px-5 py-4 font-medium text-slate-900">{patient.name}</td>
+                      <td className="px-5 py-4">{patient.age ?? '-'}</td>
                       <td className="px-5 py-4 capitalize">
                         {patient.gender?.replaceAll('_', ' ') ?? '-'}
                       </td>

@@ -7,4 +7,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    // The app calls relative /api/v1/... URLs. In dev, forward them to the
+    // nginx gateway (docker compose up, or the local nginx config).
+    proxy: {
+      '/api': 'http://localhost',
+    },
+  },
 })

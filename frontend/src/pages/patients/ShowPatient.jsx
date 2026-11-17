@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../../features/auth/authSlice'
+import { apiFetch } from '../../api/client'
 import Header from '../../components/Header'
 
 export default function ShowPatient() {
@@ -20,8 +21,8 @@ export default function ShowPatient() {
 
     async function fetchPatient() {
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_PATIENT_API_URL}/patients/${id}`,
+        const response = await apiFetch(
+          `/patients/${id}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,

@@ -1,29 +1,21 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from app.models.doctor import Doctor
 
+
 class DoctorRepository:
-  @staticmethod
-  def get_by_email(db: Session, email: str):
-    return(
-      db.query(Doctor).filter(Doctor.email == email).first()
-    )
+    @staticmethod
+    def get_by_id(db: Session, doctor_id: int) -> Doctor | None:
+        return db.get(Doctor, doctor_id)
 
-  @staticmethod
-  def get_by_username(db: Session, username: str):
-    return(
-      db.query(Doctor).filter(Doctor.username == username).first()
-    )
+    @staticmethod
+    def get_by_user_id(db: Session, user_id: int) -> Doctor | None:
+        return db.scalars(select(Doctor).where(Doctor.user_id == user_id)).first()
 
-  @staticmethod
-  def get_by_id(db: Session, id: int):
-    return(db.query(Doctor).filter(Doctor.id == id).first())
-
-  @staticmethod
-  def create(db: Session, doctor_data: dict):
-    doctor = Doctor(**doctor_data)
-
-    db.add(doctor)
-    db.commit()
-    db.refresh(doctor)
-
-    return doctor
+    @staticmethod
+    def add(db: Session, user_id: int, fields: dict) -> Doctor:
+        doctor = Doctor(user_id=user_id, **fields)
+        db.add(doctor)
+        db.flush()
+        return doctor

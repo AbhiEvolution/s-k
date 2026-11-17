@@ -4,6 +4,7 @@ import { useDispatch } from 'react-redux'
 import { useLocation, useNavigate } from 'react-router'
 import { setCredentials } from '../features/auth/authSlice'
 import Header from '../components/Header'
+import { API } from '../api/client'
 
 export default function Login() {
   const dispatch = useDispatch()
@@ -22,7 +23,7 @@ export default function Login() {
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_DOCTOR_API_URL}/doctors/login`,
+        `${API}/auth/login`,
         {
           method: 'POST',
           headers: {

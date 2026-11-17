@@ -1,3 +1,16 @@
+# Whole stack behind one gateway:  http://localhost
+#
+# First time only:
+#   cp .env.example .env
+#   (cd backend/auth && python scripts/generate_keys.py)   # creates keys/private.pem
+#   docker compose up --build
+
+x-jwt: &jwt
+  JWT_ISSUER: ${JWT_ISSUER}
+  JWT_AUDIENCE: ${JWT_AUDIENCE}
+  # Services fetch the PUBLIC key from auth. No shared secret.
+  AUTH_JWKS_URL: http://auth-api:8000/.well-known/jwks.json
+
 services:
   nginx:
     image: nginx:alpine
@@ -7,8 +20,81 @@ services:
     volumes:
       - ./nginx/nginx.docker.conf:/etc/nginx/nginx.conf:ro
     depends_on:
+      - auth-api
+      - clinics-api
       - doctors-api
       - patients-api
+      - frontend
+
+  # ---------------------------------------------------------------- auth
+  postgres-auth:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTH_POSTGRES_DB}
+      POSTGRES_USER: ${AUTH_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth-api:
+    build: ./backend/auth
+    image: auth-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8003:8000"
+    environment:
+      <<: *jwt
+      DATABASE_URL: "postgresql+psycopg://${AUTH_POSTGRES_USER}:${AUTH_POSTGRES_PASSWORD}@postgres-auth:5432/${AUTH_POSTGRES_DB}"
+      JWT_PRIVATE_KEY_PATH: /run/keys/private.pem
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS}
+    volumes:
+      # The private key stays on the host and is mounted read-only into auth only.
+      - ./backend/auth/keys:/run/keys:ro
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+
+  # -------------------------------------------------------------- clinic
+  postgres-clinic:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${CLINIC_POSTGRES_DB}
+      POSTGRES_USER: ${CLINIC_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${CLINIC_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - postgres_clinic_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clinics-api:
+    build: ./backend/clinic
+    image: clinics-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      <<: *jwt
+      DATABASE_URL: "postgresql+psycopg://${CLINIC_POSTGRES_USER}:${CLINIC_POSTGRES_PASSWORD}@postgres-clinic:5432/${CLINIC_POSTGRES_DB}"
+    depends_on:
+      postgres-clinic:
+        condition: service_healthy
+
+  # -------------------------------------------------------------- doctor
   postgres-doctor:
     image: postgres:17
     restart: unless-stopped
@@ -27,19 +113,20 @@ services:
       retries: 10
 
   doctors-api:
-    image: doctors-service:1.0.0
+    build: ./backend/doctor
+    image: doctors-service:2.0.0
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
+      <<: *jwt
       DATABASE_URL: "postgresql+psycopg://${DOCTOR_POSTGRES_USER}:${DOCTOR_POSTGRES_PASSWORD}@postgres-doctor:5432/${DOCTOR_POSTGRES_DB}"
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_ALGORITHM: ${JWT_ALGORITHM}
-      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      CLINIC_SERVICE_URL: http://clinics-api:8000
     depends_on:
       postgres-doctor:
         condition: service_healthy
 
+  # ------------------------------------------------------------- patient
   postgres-patient:
     image: postgres:17
     restart: unless-stopped
@@ -58,25 +145,28 @@ services:
       retries: 10
 
   patients-api:
-    image: patients-service:1.0.0
+    build: ./backend/patient
+    image: patients-service:2.0.0
     restart: unless-stopped
     ports:
       - "8001:8000"
     environment:
+      <<: *jwt
       DATABASE_URL: "postgresql+psycopg://${PATIENT_POSTGRES_USER}:${PATIENT_POSTGRES_PASSWORD}@postgres-patient:5432/${PATIENT_POSTGRES_DB}"
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_ALGORITHM: ${JWT_ALGORITHM}
-      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      CLINIC_SERVICE_URL: http://clinics-api:8000
     depends_on:
       postgres-patient:
         condition: service_healthy
 
+  # ------------------------------------------------------------ frontend
   frontend:
+    build: ./frontend
     image: frontend-service:1.0.0
     restart: unless-stopped
-    ports:
-      - "5173:3000"
+    # No published port: the browser reaches it through nginx on http://localhost
 
 volumes:
+  postgres_auth_data:
+  postgres_clinic_data:
   postgres_doctor_data:
   postgres_patient_data:

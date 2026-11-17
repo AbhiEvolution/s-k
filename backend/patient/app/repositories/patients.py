@@ -1,13 +1,12 @@
-
 from sqlalchemy.orm import Session
 
 from app.models.patients import Patient
-from app.schemas.patients import PatientCreate
+from app.schemas.patients import PatientCreate, PatientUpdate
 
 
 class PatientRepository:
-  def create(self,db: Session, request: PatientCreate, doctor_id: int ) -> Patient:
-    new_patient = Patient(**request.model_dump(), doctor_id=doctor_id)
+  def create(self, db: Session, request: PatientCreate, created_by_user_id: int) -> Patient:
+    new_patient = Patient(**request.model_dump(), created_by_user_id=created_by_user_id)
 
     try:
       db.add(new_patient)
@@ -18,22 +17,20 @@ class PatientRepository:
       db.rollback()
       raise
 
-  def get_by_id(self, db: Session, patient_id: int, doctor_id: int) -> Patient | None:
-    return (db.query(Patient).filter(Patient.id == patient_id, Patient.doctor_id == doctor_id).first())
+  def get_by_id(self, db: Session, patient_id: int) -> Patient | None:
+    # Not scoped here: the SERVICE checks clinic membership using the row's clinic_id.
+    return db.query(Patient).filter(Patient.id == patient_id).first()
 
-  def all_patients(self, db: Session, doctor_id: int, skip: int = 0, limit: int = 100) -> list[Patient]:
-    if skip < 0:
-      raise ValueError("skip cannot be negative")
+  def all_patients(self, db: Session, clinic_id: int, skip: int = 0, limit: int = 100) -> list[Patient]:
+    return (
+      db.query(Patient).filter(Patient.clinic_id == clinic_id)
+      .order_by(Patient.id).offset(skip).limit(limit).all()
+    )
 
-    if limit < 1 or limit > 100:
-      raise ValueError("limit must be between 1 and 100")
+  def count_by_clinic_id(self, db: Session, clinic_id: int) -> int:
+    return db.query(Patient).filter(Patient.clinic_id == clinic_id).count()
 
-    return (db.query(Patient).filter(Patient.doctor_id == doctor_id).order_by(Patient.id).offset(skip).limit(limit).all())
-
-  def count_by_doctor_id(self, db: Session, doctor_id: int) -> int:
-    return (db.query(Patient).filter(Patient.doctor_id == doctor_id).count())
-
-  def update(self,db: Session, patient: Patient, request: PatientCreate) -> Patient:
+  def update(self, db: Session, patient: Patient, request: PatientUpdate) -> Patient:
     for field, value in request.model_dump().items():
       setattr(patient, field, value)
 
