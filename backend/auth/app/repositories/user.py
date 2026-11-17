@@ -18,3 +18,7 @@ class UserRepository:
         db.commit()
         db.refresh(user)
         return user
+
+    @staticmethod
+    def get_by_ids(db: Session, ids: list[int]) -> list[User]:
+        return list(db.scalars(select(User).where(User.id.in_(ids)).order_by(User.id)))

@@ -14,7 +14,13 @@ class ClinicServiceUnavailableError(Exception):
     pass
 
 
-def verify_membership(clinic_id: int, user_id: int, token: str) -> None:
+# Any member of a clinic may see its list of doctors.
+ANY_CLINIC_ROLE = {"clinic_admin", "doctor", "staff"}
+
+
+def verify_membership(
+    clinic_id: int, user_id: int, token: str, allowed_roles: set[str] = ALLOWED_CLINIC_ROLES
+) -> None:
     """Ask the clinic service: is this user really a doctor in this clinic?
 
     We forward the caller's own token. The clinic service decides with its
@@ -37,7 +43,7 @@ def verify_membership(clinic_id: int, user_id: int, token: str) -> None:
         raise ClinicServiceUnavailableError()
 
     is_doctor_here = any(
-        member["user_id"] == user_id and member["role"] in ALLOWED_CLINIC_ROLES
+        member["user_id"] == user_id and member["role"] in allowed_roles
         for member in response.json()
     )
     if not is_doctor_here:

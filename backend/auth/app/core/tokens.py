@@ -62,3 +62,19 @@ def build_jwks() -> dict:
     jwk = jwt.algorithms.RSAAlgorithm.to_jwk(public_key, as_dict=True)
     jwk.update({"kid": key_id(), "use": "sig", "alg": ALGORITHM})
     return {"keys": [jwk]}
+
+
+def verify_access_token(token: str) -> dict:
+    """Verify a token WE issued, using our own public key. Raises jwt.PyJWTError."""
+    settings = get_settings()
+    claims = jwt.decode(
+        token,
+        load_private_key().public_key(),
+        algorithms=[ALGORITHM],
+        audience=settings.jwt_audience,
+        issuer=settings.jwt_issuer,
+        options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+    )
+    if claims.get("type") != "access":
+        raise jwt.InvalidTokenError("not an access token")
+    return claims
