@@ -1,7 +1,7 @@
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.clinic_client import verify_membership
+from app.core.clinic_client import ANY_CLINIC_ROLE, verify_membership
 from app.models.doctor import Doctor
 from app.repositories.doctor import DoctorRepository
 from app.schemas.doctor import DoctorProfile
@@ -55,6 +55,12 @@ class DoctorService:
         db.commit()
         db.refresh(doctor)
         return doctor
+
+    @staticmethod
+    def list_for_clinic(db: Session, user_id: int, token: str, clinic_id: int) -> list[Doctor]:
+        # Raises NotClinicMemberError / ClinicServiceUnavailableError.
+        verify_membership(clinic_id, user_id, token, ANY_CLINIC_ROLE)
+        return DoctorRepository.list_by_clinic(db, clinic_id)
 
     @staticmethod
     def get_public(db: Session, doctor_id: int) -> Doctor:

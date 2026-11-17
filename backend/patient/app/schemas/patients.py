@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 class PatientUpdate(BaseModel):
@@ -12,6 +12,7 @@ class PatientUpdate(BaseModel):
   address: str = Field(min_length=3, max_length=255)
   mobile_number: str = Field(pattern=r"^\+?\d{10,15}$")
   gender: Literal["female", "male", "other", "prefer_not_to_say"]
+  email: EmailStr | None = None
 
 
 class PatientCreate(PatientUpdate):
@@ -27,6 +28,7 @@ class PatientResponse(BaseModel):
   address: str
   mobile_number: str
   gender: str
+  email: EmailStr | None = None
   created_at: datetime
   updated_at: datetime
 

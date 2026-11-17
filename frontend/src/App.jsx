@@ -8,6 +8,11 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import NewPatient from "./pages/patients/NewPatient";
 import ShowPatient from "./pages/patients/ShowPatient";
 import EditPatient from "./pages/patients/EditPatient";
+import Appointments from "./pages/appointments/Appointments";
+import NewAppointment from "./pages/appointments/NewAppointment";
+import Availability from "./pages/Availability";
+import Clinics from "./pages/clinics/Clinics";
+import ClinicDetail from "./pages/clinics/ClinicDetail";
 
 function App() {
   return (
@@ -21,6 +26,11 @@ function App() {
         <Route path="/patient/new" element={<NewPatient />}/>
         <Route path="/patients/:id" element={<ShowPatient />} />
         <Route path="/patients/:id/edit" element={<EditPatient />} />
+        <Route path="/appointments" element={<Appointments />} />
+        <Route path="/appointments/new" element={<NewAppointment />} />
+        <Route path="/availability" element={<Availability />} />
+        <Route path="/clinics" element={<Clinics />} />
+        <Route path="/clinics/:id" element={<ClinicDetail />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

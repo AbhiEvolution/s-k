@@ -14,6 +14,11 @@ class DoctorRepository:
         return db.scalars(select(Doctor).where(Doctor.user_id == user_id)).first()
 
     @staticmethod
+    def list_by_clinic(db: Session, clinic_id: int) -> list[Doctor]:
+        stmt = select(Doctor).where(Doctor.clinic_id == clinic_id).order_by(Doctor.full_name, Doctor.id)
+        return list(db.scalars(stmt))
+
+    @staticmethod
     def add(db: Session, user_id: int, fields: dict) -> Doctor:
         doctor = Doctor(user_id=user_id, **fields)
         db.add(doctor)

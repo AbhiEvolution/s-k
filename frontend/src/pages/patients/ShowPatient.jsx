@@ -1,118 +1,159 @@
-
 import { useEffect, useState } from 'react'
-import { Link, useParams, useNavigate } from 'react-router'
-import { useDispatch, useSelector } from 'react-redux'
-import { clearCredentials } from '../../features/auth/authSlice'
-import { apiFetch } from '../../api/client'
-import Header from '../../components/Header'
+import { Link, useNavigate, useParams } from 'react-router'
+import { apiFetch, errorMessage, networkMessage } from '../../api/client'
+import AppointmentsTable from '../../components/AppointmentsTable'
+import { Alert, BackLink, EmptyState, Loading, Section } from '../../components/ui'
+import { useClinicDirectory } from '../../hooks/useClinicDirectory'
+import { humanize } from '../../lib/format'
 
 export default function ShowPatient() {
   const navigate = useNavigate()
-  const dispatch = useDispatch()
   const { id } = useParams()
-  const token = useSelector((state) => state.auth.accessToken)
 
-  const [patient, setPatient] = useState(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [state, setState] = useState({ id: null, patient: null, error: '' })
+  const [history, setHistory] = useState({ id: null, items: [], upcoming: 0, error: '' })
+  const [cancellingId, setCancellingId] = useState(null)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     let cancelled = false
 
-    async function fetchPatient() {
+    async function load() {
       try {
-        const response = await apiFetch(
-          `/patients/${id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        )
-
-        const data = await response.json().catch(() => ({}))
-
-        if (response.status === 401) {
-          if (cancelled) return
-          dispatch(clearCredentials())
-          navigate('/login', { replace: true })
-          return
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            typeof data?.detail === 'string'
-              ? data.detail
-              : 'Failed to fetch patient.'
-          )
-        }
-
-        if (!cancelled) setPatient(data)
+        const response = await apiFetch(`/patients/${id}`)
+        if (response.status === 401) return
+        if (!response.ok) throw new Error(await errorMessage(response, 'Failed to fetch the patient.'))
+        const patient = await response.json()
+        if (!cancelled) setState({ id, patient, error: '' })
       } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof TypeError
-              ? 'Unable to connect to the server.'
-              : err.message
-          )
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setState({ id, patient: null, error: networkMessage(err) })
       }
     }
 
-    if (id && token) fetchPatient()
-
+    load()
     return () => {
       cancelled = true
     }
-  }, [id, token, dispatch, navigate])
+  }, [id])
+
+  const patient = state.id === id ? state.patient : null
+  const directory = useClinicDirectory(patient?.clinic_id ?? null)
+
+  // The patient's appointment history, once we know which clinic they belong to.
+  const clinicId = patient?.clinic_id
+  useEffect(() => {
+    if (!clinicId) return
+    let cancelled = false
+
+    async function loadHistory() {
+      try {
+        const response = await apiFetch(`/appointments?clinic_id=${clinicId}&patient_id=${id}&limit=100`)
+        if (response.status === 401) return
+        if (!response.ok) throw new Error(await errorMessage(response, 'Failed to load appointments.'))
+        const items = await response.json()
+        const now = Date.now()
+        const upcoming = items.filter((a) => a.status === 'booked' && new Date(a.starts_at).getTime() > now).length
+        if (!cancelled) setHistory({ id, items, upcoming, error: '' })
+      } catch (err) {
+        if (!cancelled) setHistory({ id, items: [], upcoming: 0, error: networkMessage(err) })
+      }
+    }
+
+    loadHistory()
+    return () => {
+      cancelled = true
+    }
+  }, [clinicId, id])
+
+  const cancel = async (appointment) => {
+    if (!window.confirm('Cancel this appointment?')) return
+    try {
+      setCancellingId(appointment.id)
+      setActionError('')
+      const response = await apiFetch(`/appointments/${appointment.id}/cancel`, { method: 'POST' })
+      if (response.status === 401) return
+      if (!response.ok) throw new Error(await errorMessage(response, 'Failed to cancel the appointment.'))
+      const updated = await response.json()
+      const wasUpcoming = new Date(appointment.starts_at).getTime() > Date.now()
+      setHistory((prev) => ({
+        ...prev,
+        items: prev.items.map((a) => (a.id === updated.id ? updated : a)),
+        upcoming: wasUpcoming ? Math.max(0, prev.upcoming - 1) : prev.upcoming,
+      }))
+    } catch (err) {
+      setActionError(networkMessage(err))
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
+  const doctorName = (doctorId) => directory.doctors.find((d) => d.id === doctorId)?.full_name ?? `Doctor #${doctorId}`
+  const loading = state.id !== id
+  const items = history.id === id ? history.items : []
 
   return (
-    <>
-      <Header />
-      <main className="page-main page-main-narrow">
-        <section className="page-card">
-          <header className="page-card-header flex items-start justify-between gap-4">
-            <div>
-              <h1 className="page-title">Patient details</h1>
-              <p className="page-description">View this patient record.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/dashboard')}
-              className="button-secondary"
-            >
-              Back to patients
-            </button>
-          </header>
+    <main className="page-main grid gap-6">
+      <BackLink to="/patients">All patients</BackLink>
 
-          <div className="page-card-body grid gap-5">
-            {loading ? (
-              <p role="status" className="page-description">Loading patient...</p>
-            ) : error ? (
-              <p role="alert" className="feedback-error">{error}</p>
-            ) : patient ? (
-              <div className="grid gap-4">
-                <Detail label="Name" value={patient.name} />
-                <Detail label="Age" value={patient.age} />
-                <Detail label="Gender" value={patient.gender?.replaceAll('_', ' ')} />
-                <Detail label="Mobile Number" value={patient.mobile_number} />
-                <Detail label="Address" value={patient.address} />
-                <Link
-                  to={`/patients/${patient.id}/edit`}
-                  className="button-primary mt-1"
-                >
-                  Edit patient
-                </Link>
+      {loading ? (
+        <Section><Loading label="Loading patient..." /></Section>
+      ) : state.error ? (
+        <Alert>{state.error}</Alert>
+      ) : (
+        <div className="grid items-start gap-6 lg:grid-cols-[1fr_2fr]">
+          <Section
+            title={patient.name}
+            description={`Patient #${patient.id}`}
+            padded
+          >
+            <div className="grid gap-4">
+              <Detail label="Age" value={patient.age} />
+              <Detail label="Gender" value={humanize(patient.gender)} />
+              <Detail label="Mobile" value={patient.mobile_number} />
+              <Detail label="Email" value={patient.email} />
+              <Detail label="Address" value={patient.address} />
+              <div className="mt-1 grid gap-2">
+                <Link to={`/appointments/new?patient=${patient.id}`} className="button-primary">Book appointment</Link>
+                <Link to={`/patients/${patient.id}/edit`} className="button-secondary">Edit patient</Link>
               </div>
+            </div>
+          </Section>
+
+          <Section
+            title="Appointment history"
+            description={history.id === id ? `${items.length} total, ${history.upcoming} upcoming.` : undefined}
+          >
+            <Alert>{actionError || (history.id === id ? history.error : '')}</Alert>
+            {history.id !== id || directory.loading ? (
+              <Loading label="Loading appointments..." />
+            ) : items.length === 0 ? (
+              <EmptyState
+                title="No appointments yet"
+                action={<Link to={`/appointments/new?patient=${patient.id}`} className="button-primary">Book the first one</Link>}
+              >
+                Appointments booked for this patient will be listed here.
+              </EmptyState>
             ) : (
-              <p className="page-description">Patient not found.</p>
+              <AppointmentsTable
+                items={[...items].sort((a, b) => b.starts_at.localeCompare(a.starts_at))}
+                doctorName={doctorName}
+                onCancel={cancel}
+                cancellingId={cancellingId}
+                showPatient={false}
+              />
             )}
-          </div>
-        </section>
-      </main>
-    </>
+          </Section>
+        </div>
+      )}
+
+      {!loading && !state.error && (
+        <div>
+          <button type="button" onClick={() => navigate('/patients')} className="button-secondary button-sm">
+            Back to patients
+          </button>
+        </div>
+      )}
+    </main>
   )
 }
 
@@ -120,7 +161,7 @@ function Detail({ label, value }) {
   return (
     <div className="detail-row">
       <p className="detail-label">{label}</p>
-      <p className="detail-value">{value ?? '-'}</p>
+      <p className="detail-value capitalize">{value ?? '–'}</p>
     </div>
   )
 }

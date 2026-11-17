@@ -1,304 +1,165 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, Link } from 'react-router'
-import { useDispatch, useSelector } from 'react-redux'
-import { clearCredentials, setClinic } from '../features/auth/authSlice'
-import { apiFetch } from '../api/client'
-import Header from '../components/Header'
+import { Link } from 'react-router'
+import { apiFetch, errorMessage, networkMessage } from '../api/client'
+import { Alert, EmptyState, Loading, PageHeader, Section, Stat, StatusBadge } from '../components/ui'
+import { useApp } from '../context/AppContext'
+import { useClinicDirectory } from '../hooks/useClinicDirectory'
+import { formatTime, utcDate } from '../lib/format'
 
-const detailOf = (data, fallback) =>
-  typeof data?.detail === 'string' ? data.detail : fallback
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function greeting() {
+  const hour = new Date().getHours()
+  return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+}
 
 export default function Dashboard() {
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
-  const token = useSelector((state) => state.auth.accessToken)
-  const clinicId = useSelector((state) => state.auth.clinicId)
+  const { clinicId, activeClinic, doctor, role, isAdmin } = useApp()
+  const directory = useClinicDirectory(clinicId)
+  const [upcoming, setUpcoming] = useState({ clinicId: null, items: [], error: '' })
 
-  const [doctor, setDoctor] = useState(null)
-  const [clinics, setClinics] = useState([])
-  const [patients, setPatients] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [deletingId, setDeletingId] = useState(null)
-
-  // 1) Who am I, and which clinics do I belong to?
-  useEffect(() => {
-    if (!token) {
-      navigate('/login', { replace: true })
-      return
-    }
-
-    let cancelled = false
-
-    async function loadProfileAndClinics() {
-      try {
-        setLoading(true)
-        setError('')
-
-        const [doctorRes, clinicsRes] = await Promise.all([
-          apiFetch('/doctors/me'),
-          apiFetch('/clinics'),
-        ])
-
-        if (doctorRes.status === 401 || clinicsRes.status === 401) {
-          dispatch(clearCredentials())
-          navigate('/login', { replace: true })
-          return
-        }
-
-        // A missing profile (404) is not fatal: we just show a generic name.
-        if (doctorRes.ok && !cancelled) setDoctor(await doctorRes.json())
-
-        if (!clinicsRes.ok) {
-          const data = await clinicsRes.json().catch(() => ({}))
-          throw new Error(detailOf(data, 'Failed to load clinics.'))
-        }
-
-        const clinicList = await clinicsRes.json()
-        if (cancelled) return
-        setClinics(clinicList)
-
-        // Keep the remembered clinic only if I still belong to it.
-        if (!clinicList.some((clinic) => clinic.id === clinicId)) {
-          dispatch(setClinic(clinicList[0]?.id ?? null))
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof TypeError
-              ? 'Unable to connect to the server.'
-              : err.message
-          )
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    loadProfileAndClinics()
-    return () => {
-      cancelled = true
-    }
-    // clinicId is intentionally not a dependency: this effect sets it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, dispatch, navigate])
-
-  // 2) The patients of the selected clinic.
+  // The next seven days of booked appointments, in one request.
   useEffect(() => {
     if (!clinicId) return
-
     let cancelled = false
 
-    async function loadPatients() {
+    async function load() {
       try {
-        const response = await apiFetch(`/patients?clinic_id=${clinicId}`)
-        const data = await response.json().catch(() => ({}))
-
-        if (response.status === 401) return // apiFetch already cleared the session
-
-        if (!response.ok) {
-          throw new Error(detailOf(data, 'Failed to load patients.'))
-        }
-        if (!cancelled) setPatients(Array.isArray(data) ? data : [])
+        const now = new Date()
+        const params = new URLSearchParams({
+          clinic_id: String(clinicId),
+          status: 'booked',
+          start_from: now.toISOString(),
+          start_to: new Date(now.getTime() + 7 * DAY_MS).toISOString(),
+          limit: '100',
+        })
+        const response = await apiFetch(`/appointments?${params}`)
+        if (response.status === 401) return
+        if (!response.ok) throw new Error(await errorMessage(response, 'Failed to load appointments.'))
+        const items = await response.json()
+        if (!cancelled) setUpcoming({ clinicId, items, error: '' })
       } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof TypeError
-              ? 'Unable to connect to the server.'
-              : err.message
-          )
-        }
+        if (!cancelled) setUpcoming({ clinicId, items: [], error: networkMessage(err) })
       }
     }
 
-    loadPatients()
+    load()
     return () => {
       cancelled = true
     }
-  }, [clinicId, token])
+  }, [clinicId])
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this patient?')) {
-      return
-    }
+  const name = doctor?.full_name ? `Dr. ${doctor.full_name.replace(/^Dr\.?\s*/i, '')}` : null
+  const intro = (
+    <PageHeader
+      title={`${greeting()}${name ? `, ${name}` : ''}`}
+      description={activeClinic ? `Here is what is happening at ${activeClinic.name}.` : 'Welcome to MediCare.'}
+    />
+  )
 
-    try {
-      setDeletingId(id)
-      setError('')
-
-      const response = await apiFetch(`/patients/${id}`, { method: 'DELETE' })
-
-      if (response.status === 401) {
-        dispatch(clearCredentials())
-        navigate('/login', { replace: true })
-        return
-      }
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
-        throw new Error(detailOf(data, 'Failed to delete patient.'))
-      }
-
-      setPatients((prev) => prev.filter((patient) => patient.id !== id))
-    } catch (err) {
-      setError(
-        err instanceof TypeError
-          ? 'Unable to connect to the server.'
-          : err.message
-      )
-    } finally {
-      setDeletingId(null)
-    }
-  }
-
-  if (loading) {
+  if (!clinicId) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Header />
-        <main className="page-main">
-          <section className="page-card page-card-body">
-            <p role="status" className="page-description">Loading dashboard...</p>
-          </section>
-        </main>
-      </div>
+      <main className="page-main">
+        {intro}
+        <Section>
+          <EmptyState
+            title="You are not part of a clinic yet"
+            action={isAdmin && <Link to="/clinics" className="button-primary">Create a clinic</Link>}
+          >
+            {isAdmin
+              ? 'Create your first clinic, then add doctors and staff to it.'
+              : 'Ask a clinic administrator to add you. Once you are a member, patients and appointments appear here.'}
+          </EmptyState>
+        </Section>
+      </main>
     )
   }
 
-  const doctorName = doctor?.full_name ?? 'Doctor'
-  const hasClinic = clinicId !== null && clinics.some((clinic) => clinic.id === clinicId)
-  const shownPatients = hasClinic ? patients : []
+  const loaded = upcoming.clinicId === clinicId && !directory.loading
+  const items = upcoming.clinicId === clinicId ? upcoming.items : []
+  const today = utcDate()
+  const todayCount = items.filter((a) => utcDate(a.starts_at) === today).length
+  const mine = doctor ? items.filter((a) => a.doctor_id === doctor.id).length : null
+  const patientCount = directory.patients.length
+  const nameOf = (list, id, key) => list.find((x) => x.id === id)?.[key]
+
+  const tips = []
+  if (role === 'doctor' && !doctor) tips.push('Your doctor profile is missing, so you cannot be booked yet.')
+  if (role === 'doctor' && doctor && !doctor.clinic_id) tips.push('Link your doctor profile to a clinic to appear in booking.')
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-      <main className="page-main grid gap-6">
-        {/* Welcome */}
-        <section className="page-card flex flex-col justify-between gap-4 p-6 sm:flex-row sm:items-center">
-          <div>
-            <p className="page-description mt-0">Welcome back</p>
-            <h2 className="page-title mt-1">Dr. {doctorName}</h2>
-            <p className="page-description">
-              Manage your clinic&apos;s patient records in one place.
-            </p>
-          </div>
+    <main className="page-main grid gap-6">
+      {intro}
 
-          {hasClinic && (
-            <Link to="/patient/new" className="button-primary">
-              + Add Patient
-            </Link>
-          )}
-        </section>
+      {tips.map((tip) => <Alert key={tip}>{tip}</Alert>)}
+      <Alert>{directory.error || upcoming.error}</Alert>
 
-        {/* Clinic */}
-        <section className="page-card p-5">
-          <p className="field-label">Clinic</p>
-          {clinics.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-600">
-              You are not a member of any clinic yet. Ask a clinic administrator
-              to add you before managing patients.
-            </p>
-          ) : clinics.length === 1 ? (
-            <p className="mt-2 text-lg font-semibold text-slate-900">{clinics[0].name}</p>
-          ) : (
-            <select
-              aria-label="Select clinic"
-              value={clinicId ?? ''}
-              onChange={(event) => dispatch(setClinic(Number(event.target.value)))}
-              className="field-control mt-2"
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat label="Patients" value={loaded ? (patientCount >= 100 ? '100+' : patientCount) : '–'} hint="in this clinic" />
+        <Stat label="Today" value={loaded ? todayCount : '–'} hint="appointments still ahead (UTC)" />
+        <Stat
+          label="Next 7 days"
+          value={loaded ? items.length : '–'}
+          hint={mine !== null && loaded ? `${mine} with you` : 'booked appointments'}
+        />
+        <Stat label="Doctors" value={loaded ? directory.doctors.length : '–'} hint="working at this clinic" />
+      </div>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[2fr_1fr]">
+        <Section
+          title="Coming up"
+          description="The next booked appointments."
+          actions={<Link to="/appointments" className="link text-sm">View all</Link>}
+        >
+          {!loaded ? (
+            <Loading />
+          ) : items.length === 0 ? (
+            <EmptyState
+              title="Nothing booked this week"
+              action={<Link to="/appointments/new" className="button-primary">Book an appointment</Link>}
             >
-              {clinics.map((clinic) => (
-                <option key={clinic.id} value={clinic.id}>
-                  {clinic.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </section>
-
-        {/* Patient count */}
-        <section className="page-card p-5">
-          <p className="field-label">Total Patients</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{shownPatients.length}</p>
-        </section>
-
-        {/* Error */}
-        {error && (
-          <div role="alert" className="feedback-error">
-            {error}
-          </div>
-        )}
-
-        {/* Patient list */}
-        <section className="page-card">
-          <div className="page-card-header">
-            <h2 className="page-title text-lg">Clinic Patients</h2>
-            <p className="page-description">
-              View and manage the patient records of the selected clinic.
-            </p>
-          </div>
-
-          {shownPatients.length === 0 ? (
-            <div className="px-5 py-12 text-center">
-              <p className="font-semibold text-slate-800">No patients found</p>
-              <p className="mt-1 text-sm text-gray-500">
-                {hasClinic ? 'Add a patient to get started.' : 'Join a clinic to see patients.'}
-              </p>
-            </div>
+              Appointments you book will show up here.
+            </EmptyState>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="px-5 py-3 font-medium">ID</th>
-                    <th className="px-5 py-3 font-medium">Name</th>
-                    <th className="px-5 py-3 font-medium">Age</th>
-                    <th className="px-5 py-3 font-medium">Gender</th>
-                    <th className="px-5 py-3 text-right font-semibold">Actions</th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {shownPatients.map((patient) => (
-                    <tr key={patient.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-4">{patient.id}</td>
-                      <td className="px-5 py-4 font-medium text-slate-900">{patient.name}</td>
-                      <td className="px-5 py-4">{patient.age ?? '-'}</td>
-                      <td className="px-5 py-4 capitalize">
-                        {patient.gender?.replaceAll('_', ' ') ?? '-'}
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-right">
-                        <Link
-                          to={`/patients/${patient.id}`}
-                          className="font-semibold text-blue-700 hover:underline"
-                        >
-                          View
+            <div>
+              {items.slice(0, 6).map((appointment) => {
+                const when = new Date(appointment.starts_at)
+                const isToday = utcDate(appointment.starts_at) === today
+                return (
+                  <div key={appointment.id} className="list-row">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="w-20 shrink-0 text-center">
+                        <p className="m-0 text-base font-bold">{formatTime(appointment.starts_at)}</p>
+                        <p className="m-0 text-xs text-slate-500">
+                          {isToday ? 'Today' : when.toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' })}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <Link to={`/patients/${appointment.patient_id}`} className="link block truncate">
+                          {nameOf(directory.patients, appointment.patient_id, 'name') ?? `Patient #${appointment.patient_id}`}
                         </Link>
-
-                        <Link
-                          to={`/patients/${patient.id}/edit`}
-                          className="ml-4 font-semibold text-slate-600 hover:text-slate-900 hover:underline"
-                        >
-                          Edit
-                        </Link>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(patient.id)}
-                          disabled={deletingId === patient.id}
-                          aria-label={`Delete ${patient.name}`}
-                          className="button-danger ml-2 min-h-0 px-2 py-1"
-                        >
-                          {deletingId === patient.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <p className="m-0 truncate text-sm text-slate-500">
+                          with {nameOf(directory.doctors, appointment.doctor_id, 'full_name') ?? `doctor #${appointment.doctor_id}`}
+                        </p>
+                      </div>
+                    </div>
+                    <StatusBadge value={appointment.status} />
+                  </div>
+                )
+              })}
             </div>
           )}
-        </section>
-      </main>
-    </div>
+        </Section>
+
+        <Section title="Quick actions" padded>
+          <div className="grid gap-2">
+            <Link to="/appointments/new" className="button-primary">Book appointment</Link>
+            <Link to="/patient/new" className="button-secondary">Add patient</Link>
+            {role === 'doctor' && <Link to="/availability" className="button-secondary">Set my working hours</Link>}
+            <Link to="/clinics" className="button-secondary">Manage clinics</Link>
+          </div>
+        </Section>
+      </div>
+    </main>
   )
 }

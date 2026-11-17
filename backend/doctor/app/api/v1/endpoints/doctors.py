@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,22 @@ def create_my_profile(
         raise HTTPException(status.HTTP_409_CONFLICT, "Profile already exists")
     except NotClinicMemberError:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a doctor in that clinic")
+    except ClinicServiceUnavailableError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Clinic service unavailable")
+
+
+@router.get("", response_model=list[DoctorPublic])
+def list_clinic_doctors(
+    clinic_id: int = Query(gt=0),
+    user: CurrentUser = Depends(get_current_user),
+    token: str = Depends(_raw_token),
+    db: Session = Depends(get_db),
+):
+    """The doctors of one clinic (public cards). Members of that clinic only."""
+    try:
+        return DoctorService.list_for_clinic(db, user.id, token, clinic_id)
+    except NotClinicMemberError:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You are not a member of that clinic")
     except ClinicServiceUnavailableError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Clinic service unavailable")
 

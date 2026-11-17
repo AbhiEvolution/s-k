@@ -93,12 +93,12 @@ Use `kind` or `minikube`. In order:
 - Write a short ADR (a few lines) for each decision.
 
 ## Progress checklist
-- [ ] Stage 0: foundation cleanup
-- [ ] Stage 1: auth service, RS256, Postgres depth
-- [ ] Stage 1b: clinic service, multi-tenancy
+- [ ] Stage 0: foundation cleanup (open: pin requirements, CI)
+- [ ] Stage 1: auth service, RS256, Postgres depth (open: password reset, EXPLAIN ANALYZE exercise)
+- [x] Stage 1b: clinic service, multi-tenancy (open: clinic settings / opening hours)
 - [ ] Stage 2: Redis
-- [ ] Stage 3: appointment service
-- [ ] Stage 4: RabbitMQ and notification service
+- [x] Stage 3: appointment service (partial unique indexes, idempotency keys, concurrency tested on Postgres)
+- [x] Stage 4: RabbitMQ and notification service (outbox, manual acks, delayed retry, DLQ, idempotent consumer; open: password-reset email event)
 - [ ] Stage 5: Elasticsearch
 - [ ] Stage 6: Docker
 - [ ] Stage 7: Kubernetes

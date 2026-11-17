@@ -110,3 +110,32 @@ def test_verify_maps_network_error_and_5xx_to_unavailable(monkeypatch):
     _fake_http(monkeypatch, 500)
     with pytest.raises(ClinicServiceUnavailableError):
         clinic_client.verify_membership(3, 7, "tok")
+
+
+# --- listing a clinic's doctors (used by the appointment booking screen) -----
+
+def test_members_can_list_their_clinics_doctors(client, monkeypatch):
+    members = {3: {7, 8, 50}}
+
+    def fake(clinic_id, user_id, token, allowed_roles=None):
+        if user_id not in members.get(clinic_id, set()):
+            raise NotClinicMemberError()
+
+    monkeypatch.setattr("app.services.doctor.verify_membership", fake)
+    client.post(URL, json={"full_name": "Dr. Bravo", "clinic_id": 3}, headers=as_user(8))
+    client.post(URL, json={"full_name": "Dr. Alpha", "clinic_id": 3}, headers=as_user(7))
+    client.post(URL, json={"full_name": "Dr. Elsewhere"}, headers=as_user(9))  # no clinic
+
+    names = [d["full_name"] for d in client.get(f"{URL}?clinic_id=3", headers=as_user(50, "patient")).json()]
+    assert names == ["Dr. Alpha", "Dr. Bravo"]  # sorted, only this clinic
+
+    assert client.get(f"{URL}?clinic_id=3", headers=as_user(99)).status_code == 403  # not a member
+    assert client.get(URL, headers=as_user(7)).status_code == 422  # clinic_id is required
+    assert client.get(f"{URL}?clinic_id=3").status_code == 401
+
+
+def test_listing_shows_only_public_fields(client, monkeypatch):
+    monkeypatch.setattr("app.services.doctor.verify_membership", lambda *a, **k: None)
+    client.post(URL, json={"full_name": "Dr. Alpha", "clinic_id": 3, "mobile_number": "+15551234567"}, headers=as_user(7))
+    card = client.get(f"{URL}?clinic_id=3", headers=as_user(7)).json()[0]
+    assert set(card) == {"id", "full_name", "specialty", "clinic_id"}

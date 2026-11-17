@@ -246,7 +246,7 @@ export default function Register() {
             <button
               type="button"
               onClick={() => navigate('/login')}
-              className="font-semibold text-blue-600 hover:text-blue-700"
+              className="font-semibold text-brand-600 hover:text-brand-700"
             >
               Sign in
             </button>

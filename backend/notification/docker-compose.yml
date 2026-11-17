@@ -1,0 +1,36 @@
+# Local infrastructure for running this worker on its own.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Host port 5437: doctor=5432, patient=5433, auth=5434, clinic=5435, appointment=5436.
+    ports:
+      - "127.0.0.1:5437:5432"
+    volumes:
+      - notification_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI (guest / guest)
+
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"     # SMTP
+      - "127.0.0.1:8025:8025"     # web UI / API
+
+volumes:
+  notification_postgres_data:

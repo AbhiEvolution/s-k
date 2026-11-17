@@ -2,19 +2,20 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useDispatch, useSelector } from 'react-redux'
 import { clearCredentials } from '../../features/auth/authSlice'
+import { useApp } from '../../context/AppContext'
 import { apiFetch } from '../../api/client'
-import Header from '../../components/Header'
 
 export default function NewPatient() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const token = useSelector((state) => state.auth.accessToken)
-  const clinicId = useSelector((state) => state.auth.clinicId)
+  const { clinicId } = useApp()
 
   const [name, setName] = useState('')
   const [age, setAge] = useState('')
   const [address, setAddress] = useState('')
   const [mobileNumber, setMobileNumber] = useState('')
+  const [email, setEmail] = useState('')
   const [gender, setGender] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -50,6 +51,7 @@ export default function NewPatient() {
             age: Number(age),
             address: address.trim(),
             mobile_number: mobileNumber.trim(),
+            email: email.trim() || null,
             gender,
           }),
         }
@@ -84,7 +86,7 @@ export default function NewPatient() {
         )
       }
 
-      navigate('/dashboard', { replace: true })
+      navigate('/patients', { replace: true })
     } catch (err) {
       setError(
         err instanceof TypeError
@@ -98,7 +100,6 @@ export default function NewPatient() {
 
   return (
     <>
-      <Header />
       <main className="page-main page-main-narrow">
         <section className="page-card">
           <div className="page-card-header">
@@ -138,6 +139,21 @@ export default function NewPatient() {
               pattern="[+]?[0-9]{10,15}"
               title="Enter 10 to 15 digits, optionally starting with +."
               required
+              className="field-control"
+            />
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="email" className="field-label">
+              Email (optional, for appointment notices)
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="patient@example.com"
+              autoComplete="off"
               className="field-control"
             />
           </div>
@@ -211,10 +227,10 @@ export default function NewPatient() {
 
           <button
             type="button"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/patients')}
             className="button-secondary w-full"
           >
-            Back to Dashboard
+            Back to patients
           </button>
           </form>
         </section>

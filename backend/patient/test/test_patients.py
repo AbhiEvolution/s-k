@@ -111,3 +111,15 @@ def test_pagination_limit_is_enforced(client):
 
 def test_health_needs_no_token(client):
   assert client.get("/health").status_code == 200
+
+
+def test_email_is_optional_validated_and_returned(client):
+  headers = as_user(10)
+  patient_id = create(client, headers, email="grace@example.com")
+  assert client.get(f"{URL}/{patient_id}", headers=headers).json()["email"] == "grace@example.com"
+
+  without = create(client, headers, name="No Email Person")
+  assert client.get(f"{URL}/{without}", headers=headers).json()["email"] is None
+
+  bad = client.post(URL, json={**PATIENT, "email": "not-an-email"}, headers=headers)
+  assert bad.status_code == 422

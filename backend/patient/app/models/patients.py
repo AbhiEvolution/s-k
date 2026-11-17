@@ -19,6 +19,8 @@ class Patient(Base):
     age = Column(Integer, nullable=True)
     address = Column(String(255), nullable=True)
     mobile_number = Column(String(15), nullable=True)
+    # Where appointment notifications are sent. Optional: no email, no notification.
+    email = Column(String(255), nullable=True)
     gender = Column(String(20), nullable=True)
 
     created_at = Column(
