@@ -24,6 +24,7 @@ services:
       - clinics-api
       - doctors-api
       - patients-api
+      - appointments-api
       - frontend
 
   # ---------------------------------------------------------------- auth
@@ -158,6 +159,123 @@ services:
       postgres-patient:
         condition: service_healthy
 
+  # --------------------------------------------------------- appointment
+  postgres-appointment:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${APPOINTMENT_POSTGRES_DB}
+      POSTGRES_USER: ${APPOINTMENT_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${APPOINTMENT_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5436:5432"
+    volumes:
+      - postgres_appointment_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  appointments-api:
+    build: ./backend/appointment
+    image: appointments-service:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8004:8000"
+    environment:
+      <<: *jwt
+      DATABASE_URL: "postgresql+psycopg://${APPOINTMENT_POSTGRES_USER}:${APPOINTMENT_POSTGRES_PASSWORD}@postgres-appointment:5432/${APPOINTMENT_POSTGRES_DB}"
+      CLINIC_SERVICE_URL: http://clinics-api:8000
+      DOCTOR_SERVICE_URL: http://doctors-api:8000
+      PATIENT_SERVICE_URL: http://patients-api:8000
+    depends_on:
+      postgres-appointment:
+        condition: service_healthy
+
+  # The relay publishes the appointment service's outbox to RabbitMQ.
+  # Same image as the API, different command; it never runs migrations itself.
+  appointments-relay:
+    build: ./backend/appointment
+    image: appointments-service:1.0.0
+    command: ["python", "-m", "app.relay"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${APPOINTMENT_POSTGRES_USER}:${APPOINTMENT_POSTGRES_PASSWORD}@postgres-appointment:5432/${APPOINTMENT_POSTGRES_DB}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      <<: *jwt
+    depends_on:
+      postgres-appointment:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      appointments-api:
+        condition: service_started
+
+  # ------------------------------------------------------------- messaging
+  rabbitmq:
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP
+      - "127.0.0.1:15672:15672"   # management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # Catches every email the stack sends. Nothing leaves your machine.
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"     # web UI and API: http://localhost:8025
+
+  # ---------------------------------------------------------- notification
+  postgres-notification:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB}
+      POSTGRES_USER: ${NOTIFICATION_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${NOTIFICATION_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5437:5432"
+    volumes:
+      - postgres_notification_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  notification-worker:
+    build: ./backend/notification
+    image: notification-service:1.0.0
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${NOTIFICATION_POSTGRES_USER}:${NOTIFICATION_POSTGRES_PASSWORD}@postgres-notification:5432/${NOTIFICATION_POSTGRES_DB}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURITY: none
+      SMTP_FROM: clinic@example.com
+      MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS}
+      RETRY_DELAY_MS: ${NOTIFICATION_RETRY_DELAY_MS}
+    depends_on:
+      postgres-notification:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
   # ------------------------------------------------------------ frontend
   frontend:
     build: ./frontend
@@ -170,3 +288,6 @@ volumes:
   postgres_clinic_data:
   postgres_doctor_data:
   postgres_patient_data:
+  postgres_appointment_data:
+  postgres_notification_data:
+  rabbitmq_data:
