@@ -4,7 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routers import api_router
 from app.core.exceptions import (PatientNotFoundError, patient_not_found_handler )
 
-app = FastAPI(title="Patients API", version="1.0.0")
+app = FastAPI(
+  title="Patients API",
+  version="1.0.0",
+  openapi_url="/api/v1/patients/openapi.json",
+)
 app.include_router(api_router, prefix="/api/v1")
 
 app.add_exception_handler(

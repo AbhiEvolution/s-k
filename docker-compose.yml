@@ -1,5 +1,14 @@
-
 services:
+  nginx:
+    image: nginx:alpine
+    container_name: api-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.docker.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - doctors-api
+      - patients-api
   postgres-doctor:
     image: postgres:17
     restart: unless-stopped
